@@ -185,17 +185,43 @@ int main(void)
   HAL_Delay(500);
   while (1)
   {
+	  // 1. Monitor Trip Input (PA2 LATCH_OUT)
+	      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_SET) {
+	          system_tripped = true;
+	      }
 
-    /* USER CODE END WHILE */
+	      // 2. 2-Second Hold Reset Logic
+	      if (button_down && system_tripped) {
+	          if (HAL_GetTick() - button_press_tick >= 2000) {
+	              HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET); // Trigger LATCH_RST
+	              for(volatile int i=0; i<1000; i++);
+	              HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
 
-    /* USER CODE BEGIN 3 */
+	              system_tripped = false;
+	              button_down = false;
+	              HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_SET); // Reset LED to solid
+	          }
+	      }
 
+	      // 3. Periodic Sensor Update (500ms)
+	      if (HAL_GetTick() - last_sensor_tick >= 500) {
+	          Read_Sensors();
+	          last_sensor_tick = HAL_GetTick();
+	      }
 
-	  CAN_Send_Message(TxData, 2);
-	  HAL_Delay(50);
-	  }
-  /* USER CODE END 3 */
-}
+	      // 4. Fault Indicator Blink (250ms)
+	      if (system_tripped) {
+	          if (HAL_GetTick() - last_blink_tick >= 250) {
+	              HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_15);
+	              last_blink_tick = HAL_GetTick();
+	          }
+	      }
+
+	      // Existing CAN telemetry
+	      uint8_t TxData[2] = {(uint8_t)Curr_val, (uint8_t)Temp_val};
+	      CAN_Send_Message(TxData, 2);
+	      HAL_Delay(50);
+  }
 
 /**
   * @brief System Clock Configuration
@@ -531,45 +557,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1)
-  {
-	  // 1. Monitor Trip Input (PA2 LATCH_OUT)
-	      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_SET) {
-	          system_tripped = true;
-	      }
 
-	      // 2. 2-Second Hold Reset Logic
-	      if (button_down && system_tripped) {
-	          if (HAL_GetTick() - button_press_tick >= 2000) {
-	              HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET); // Trigger LATCH_RST
-	              for(volatile int i=0; i<1000; i++);
-	              HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
-
-	              system_tripped = false;
-	              button_down = false;
-	              HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_SET); // Reset LED to solid
-	          }
-	      }
-
-	      // 3. Periodic Sensor Update (500ms)
-	      if (HAL_GetTick() - last_sensor_tick >= 500) {
-	          Read_Sensors();
-	          last_sensor_tick = HAL_GetTick();
-	      }
-
-	      // 4. Fault Indicator Blink (250ms)
-	      if (system_tripped) {
-	          if (HAL_GetTick() - last_blink_tick >= 250) {
-	              HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_15);
-	              last_blink_tick = HAL_GetTick();
-	          }
-	      }
-
-	      // Existing CAN telemetry
-	      uint8_t TxData[2] = {(uint8_t)Curr_val, (uint8_t)Temp_val};
-	      CAN_Send_Message(TxData, 2);
-	      HAL_Delay(50);
-  }
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
