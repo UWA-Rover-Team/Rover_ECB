@@ -109,6 +109,7 @@ void CAN_Send_Message(uint8_t TxData[8], uint32_t DLC){
 	uint32_t              TxMailbox;
 
 	TxHeader.IDE = CAN_ID_STD;
+
 	TxHeader.StdId = 0x446;
 	TxHeader.RTR = CAN_RTR_DATA;
 	TxHeader.DLC = DLC;
@@ -182,46 +183,14 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  HAL_Delay(500);
   while (1)
   {
-	  // 1. Monitor Trip Input (PA2 LATCH_OUT)
-	      if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_SET) {
-	          system_tripped = true;
-	      }
+    /* USER CODE END WHILE */
 
-	      // 2. 2-Second Hold Reset Logic
-	      if (button_down && system_tripped) {
-	          if (HAL_GetTick() - button_press_tick >= 2000) {
-	              HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET); // Trigger LATCH_RST
-	              for(volatile int i=0; i<1000; i++);
-	              HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
-
-	              system_tripped = false;
-	              button_down = false;
-	              HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_SET); // Reset LED to solid
-	          }
-	      }
-
-	      // 3. Periodic Sensor Update (500ms)
-	      if (HAL_GetTick() - last_sensor_tick >= 500) {
-	          Read_Sensors();
-	          last_sensor_tick = HAL_GetTick();
-	      }
-
-	      // 4. Fault Indicator Blink (250ms)
-	      if (system_tripped) {
-	          if (HAL_GetTick() - last_blink_tick >= 250) {
-	              HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_15);
-	              last_blink_tick = HAL_GetTick();
-	          }
-	      }
-
-	      // Existing CAN telemetry
-	      uint8_t TxData[2] = {(uint8_t)Curr_val, (uint8_t)Temp_val};
-	      CAN_Send_Message(TxData, 2);
-	      HAL_Delay(50);
+    /* USER CODE BEGIN 3 */
   }
+  /* USER CODE END 3 */
+}
 
 /**
   * @brief System Clock Configuration
@@ -330,7 +299,7 @@ static void MX_CAN_Init(void)
   /* USER CODE END CAN_Init 1 */
   hcan.Instance = CAN1;
   hcan.Init.Prescaler = 8;
-  hcan.Init.Mode = CAN_MODE_LOOPBACK;
+  hcan.Init.Mode = CAN_MODE_NORMAL;
   hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
   hcan.Init.TimeSeg1 = CAN_BS1_2TQ;
   hcan.Init.TimeSeg2 = CAN_BS2_1TQ;
@@ -509,7 +478,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PB2 */
   GPIO_InitStruct.Pin = GPIO_PIN_2;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB15 */
