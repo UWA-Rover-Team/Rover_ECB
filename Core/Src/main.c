@@ -65,6 +65,20 @@ volatile bool system_tripped = false;
 
 uint32_t dac_val = 2100;
 
+bool arm_pressed = false;
+uint32_t arm_pressed_tick = 0;
+
+uint32_t telemetry_send_rate = 500;
+uint32_t last_telemetry_tick = 0; // Added for non-blocking CAN
+
+volatile bool system_tripped = false;
+
+float Curr_val = 0.0f;
+float Temp_val = 0.0f;
+
+uint32_t dac_val = 2100; // Resulting in > 1.653V
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -172,12 +186,32 @@ int main(void)
 		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_SET); //turn led off
 	  }
 
+	  if (HAL_GetTick() - last_telemetry_tick >= telemetry_send_rate) {
+	          Generate_Telemetry(); // Reads ADC and I2C
+
+	          // Prepare CAN Data: [Current, Temp, Trip_Status]
+	          uint8_t can_data[3];
+	          can_data[0] = (uint8_t)(Curr_val + 100); // Offset for negative range
+	          can_data[1] = (uint8_t)Temp_val;
+	          can_data[2] = (uint8_t)system_tripped;
+
+	          CAN_TxHeaderTypeDef TxHeader = {
+	              .StdId = 0x446,
+	              .IDE = CAN_ID_STD,
+	              .RTR = CAN_RTR_DATA,
+	              .DLC = 3
+	          };
+	          uint32_t TxMailbox;
+	          HAL_CAN_AddTxMessage(&hcan, &TxHeader, can_data, &TxMailbox);
+
+	          last_telemetry_tick = HAL_GetTick();
+	      }
+	    }
 
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
   /* USER CODE END 3 */
 }
 
@@ -577,6 +611,50 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
         //stop the timer so it doesn't repeat
         HAL_TIM_Base_Stop_IT(&htim7);
 		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET); // turn of reset pin
+    }
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    if (GPIO_Pin == GPIO_PIN_2 && system_tripped == false) //if the latch gets tripped
+    {
+        system_tripped = true;
+    }
+
+}
+
+void Reset_Latch(void){
+	//generate a 100ms pulse on the reset pin
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
+
+	  HAL_TIM_Base_Stop_IT(&htim7);
+	  __HAL_TIM_SET_AUTORELOAD(&htim7, 100 - 1); // configure timer 6 to trigger interrupt in 100 ms
+	  __HAL_TIM_SET_COUNTER(&htim7, 0);
+	  __HAL_TIM_CLEAR_FLAG(&htim7, TIM_FLAG_UPDATE);
+	  HAL_TIM_Base_Start_IT(&htim7); // start timer
+}
+
+void Set_Dac(uint32_t val){
+	HAL_DAC_SetValue(&hdac, DAC_CHANNEL_1, DAC_ALIGN_12B_R, val);
+}
+
+void Generate_Telemetry(void){
+    // 1. Current Sense (ADC PC0)
+    HAL_ADC_Start(&hadc1);
+    if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
+        uint32_t raw = HAL_ADC_GetValue(&hadc1);
+        float voltage = (raw * 3.3f) / 4095.0f;
+        // Sensitivity: 16.5mV/A, Offset: 1.65V
+        Curr_val = (voltage - 1.65f) / 0.0165f;
+    }
+    HAL_ADC_Stop(&hadc1);
+
+    // 2. Temperature Sense (I2C TMP112)
+    uint8_t i2c_buf[2];
+    // Address 0x48 (7-bit) shifted for HAL
+    if (HAL_I2C_Master_Receive(&hi2c1, (0x48 << 1), i2c_buf, 2, 50) == HAL_OK) {
+        int16_t raw_temp = (i2c_buf[0] << 4) | (i2c_buf[1] >> 4);
+        Temp_val = raw_temp * 0.0625f;
     }
 }
 
