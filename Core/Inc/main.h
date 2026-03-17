@@ -63,6 +63,7 @@ void Error_Handler(void);
 #define latch_reset_GPIO_Port GPIOA
 #define latch_output_Pin GPIO_PIN_2
 #define latch_output_GPIO_Port GPIOA
+#define latch_output_EXTI_IRQn EXTI2_IRQn
 #define trip_thresh_Pin GPIO_PIN_4
 #define trip_thresh_GPIO_Port GPIOA
 #define arm_pin_Pin GPIO_PIN_2

@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stdbool.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,12 +31,13 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+	#define VREF 3.3f
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
+	#define ADC_TO_VOLTAGE(raw)  ((float)(raw) / 4095.0f * VREF)
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -63,7 +64,9 @@ uint32_t arm_pressed_tick = 0;
 uint32_t telemetry_send_rate = 500;
 volatile bool system_tripped = false;
 
-uint32_t dac_val = 2100;
+uint32_t dac_val = 4095;
+
+
 
 /* USER CODE END PV */
 
@@ -80,7 +83,7 @@ static void MX_TIM7_Init(void);
 /* USER CODE BEGIN PFP */
 void Reset_Latch(void);
 void Set_Dac(uint32_t val);
-void Generate_Telemetry(void)
+void Generate_Telemetry(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -140,11 +143,11 @@ int main(void)
   {
 
 	  if(system_tripped && (HAL_GetTick() - last_blink >= error_blink_interval)){ //blink fault led rapidly if system is tripped
-		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_15);
+		  HAL_GPIO_TogglePin(GPIOB, fault_led_Pin);
 		  last_blink = HAL_GetTick();
 	  }
 	  else if(system_tripped == false && (HAL_GetTick() - last_blink >= normal_blink_interval)){ // flash led very briefly if system is not tripped
-		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_RESET); //turn led on
+		  HAL_GPIO_WritePin(GPIOB, fault_led_Pin, GPIO_PIN_RESET); //turn led on
 		  last_blink = HAL_GetTick();
 
 		  HAL_TIM_Base_Stop_IT(&htim6);
@@ -155,10 +158,10 @@ int main(void)
 	  }
 
 	  //check if the arm pin is being pressed
-	  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2) == GPIO_PIN_SET && arm_pressed == false){
+	  if(HAL_GPIO_ReadPin(GPIOB, arm_pin_Pin) == GPIO_PIN_SET && arm_pressed == false){
 		  arm_pressed = true;
 		  arm_pressed_tick = HAL_GetTick();
-	  } else if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_2) == GPIO_PIN_RESET){
+	  } else if(HAL_GPIO_ReadPin(GPIOB, arm_pin_Pin) == GPIO_PIN_RESET){
 		  arm_pressed = false;
 	  }
 
@@ -166,10 +169,10 @@ int main(void)
 		  system_tripped = false;
 		  Reset_Latch();
 		  for(uint32_t i = 0; i < 5; i++){ //blink led quicklu a few times
-			  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_15);
+			  HAL_GPIO_TogglePin(GPIOB, fault_led_Pin);
 			  HAL_Delay(100);
 		  }
-		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_SET); //turn led off
+		  HAL_GPIO_WritePin(GPIOB, fault_led_Pin, GPIO_PIN_SET); //turn led off
 	  }
 
 
@@ -536,13 +539,13 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : latch_output_Pin */
   GPIO_InitStruct.Pin = latch_output_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(latch_output_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : arm_pin_Pin */
   GPIO_InitStruct.Pin = arm_pin_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(arm_pin_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : fault_led_Pin */
@@ -559,6 +562,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
@@ -571,12 +578,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     {
         //stop the timer so it doesn't repeat
         HAL_TIM_Base_Stop_IT(&htim6);
-		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_SET); // turn off led
+		HAL_GPIO_WritePin(GPIOB, fault_led_Pin, GPIO_PIN_SET); // turn off led
     } else if (htim->Instance == TIM7)
     {
         //stop the timer so it doesn't repeat
         HAL_TIM_Base_Stop_IT(&htim7);
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET); // turn of reset pin
+		HAL_GPIO_WritePin(GPIOA, latch_reset_Pin, GPIO_PIN_RESET); // turn off reset pin
     }
 }
 
@@ -591,7 +598,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 void Reset_Latch(void){
 	//generate a 100ms pulse on the reset pin
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA, latch_reset_Pin, GPIO_PIN_SET);
 
 	  HAL_TIM_Base_Stop_IT(&htim7);
 	  __HAL_TIM_SET_AUTORELOAD(&htim7, 100 - 1); // configure timer 6 to trigger interrupt in 100 ms
@@ -606,18 +613,13 @@ void Set_Dac(uint32_t val){
 
 void Generate_Telemetry(void){
 
-	uint32_t adc_value = 0;
-
-	HAL_ADC_Start(&hadc1);                          // Start conversion
-	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY); // Wait until done
-	adc_value = HAL_ADC_GetValue(&hadc1);           // Read result (0-4095)
-	HAL_ADC_Stop(&hadc1);
-
-	#define VREF 3.3f
-	#define ADC_TO_VOLTAGE(raw)  ((float)(raw) / 4095.0f * VREF)
-
+	HAL_ADC_Start(&hadc1); // grab a analog value
+	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
 	uint32_t raw = HAL_ADC_GetValue(&hadc1);
-	float voltage = ADC_TO_VOLTAGE(raw);
+
+	HAL_ADC_Stop(&hadc1); // stop the adc to preserve batt (probably nto needed)
+
+	float voltage = ADC_TO_VOLTAGE(raw); // gpt macro to convert adc to vol
 
 }
 /* USER CODE END 4 */
